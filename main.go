@@ -1,37 +1,10 @@
-// package main
-
-// import (
-// 	"log"
-// 	"skribbl-clone/config"
-// 	"skribbl-clone/db"
-// 	"skribbl-clone/routes"
-
-// 	"github.com/gofiber/fiber/v2"
-// )
-
-// func main() {
-// 	// Initialize Fiber
-// 	app := fiber.New()
-
-// 	// Load configuration
-// 	config.LoadConfig()
-// 	db.InitDB()
-
-// 	// Initialize routes
-// 	routes.SetupRoutes(app)
-
-// 	// Start the server
-// 	log.Println("Starting server on :3000")
-// 	if err := app.Listen(":3000"); err != nil {
-// 		log.Fatalf("Error starting server: %v", err)
-// 	}
-// }
-
 package main
 
 import (
 	"fmt"
 	"net/http"
+	"skribbl-clone/config"
+	"skribbl-clone/db"
 
 	"github.com/gorilla/websocket"
 )
@@ -51,6 +24,36 @@ type Message struct {
 	Room     string `json:"room"`     // Target room
 	Username string `json:"username"` // Username of the sender
 	Text     string `json:"text"`     // Message content
+}
+
+func saveMessageToDB(msg Message) error {
+	query := `INSERT INTO messages (room, username, text) VALUES ($1, $2, $3)`
+	_, err := db.DB.Exec(query, msg.Room, msg.Username, msg.Text)
+	if err != nil {
+		return fmt.Errorf("failed to save message: %w", err)
+	}
+	return nil
+}
+
+func getMessagesForRoom(room string) ([]Message, error) {
+	query := `SELECT room, username, text FROM messages WHERE room = $1 ORDER BY created_at ASC`
+	rows, err := db.DB.Query(query, room)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		err := rows.Scan(&msg.Room, &msg.Username, &msg.Text)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning message: %w", err)
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
 }
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +83,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	rooms[room][ws] = true
 
+	messages, err := getMessagesForRoom(room)
+	if err == nil {
+		for _, msg := range messages {
+			ws.WriteJSON(msg)
+		}
+	}
+
 	defer func() {
 		delete(rooms[room], ws) // Remove client when they disconnect
 		if len(rooms[room]) == 0 {
@@ -105,6 +115,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 func handleMessages() {
 	for {
 		msg := <-broadcast
+		fmt.Println("printing message to DB:", msg)
+
+		err := saveMessageToDB(msg)
+		if err != nil {
+			fmt.Println("Error saving message to DB:", err)
+			continue
+		}
 
 		// Broadcast only to clients in the specified room
 		if clientsInRoom, ok := rooms[msg.Room]; ok {
@@ -124,7 +141,8 @@ func main() {
 	fs := http.FileServer(http.Dir("./frontend"))
 	http.Handle("/", fs)
 	http.HandleFunc("/ws", handleConnections)
-
+	config.LoadConfig()
+	db.InitDB()
 	go handleMessages()
 
 	fmt.Println("Server started on :8080")
