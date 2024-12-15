@@ -183,7 +183,6 @@ func main() {
 	http.Handle("/", fs)
 	http.HandleFunc("/ws", handleConnections)
 	config.LoadConfig()
-	db.InitDB()
 	db.InitMongoDB()
 	go handleMessages()
 	err2 := printAllCollections()
