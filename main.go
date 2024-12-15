@@ -182,6 +182,10 @@ func main() {
 	fs := http.FileServer(http.Dir("./frontend"))
 	http.Handle("/", fs)
 	http.HandleFunc("/ws", handleConnections)
+	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Server is running"))
+	})
 	config.LoadConfig()
 	db.InitMongoDB()
 	go handleMessages()
